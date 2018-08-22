@@ -20,16 +20,23 @@ namespace Auth0.Owin
         public Auth0AuthenticationOptions()
             : base(Constants.DefaultAuthenticationType)
         {
+            AuthenticationType = Constants.DefaultAuthenticationType;
             Caption = Constants.DefaultAuthenticationType;
             CallbackPath = new PathString("/signin-auth0");
             AuthenticationMode = AuthenticationMode.Passive;
-            Scope = new List<string>();
+            Scope = new List<string>
+            {
+                "openid",
+                "profile"
+            };
             BackchannelTimeout = TimeSpan.FromSeconds(60);
 
             Connection = string.Empty;
             Domain = string.Empty;
-            SaveIdToken = true;
             EnableDiagnostics = true;
+
+            RedirectPath = new PathString("/");
+            ErrorRedirectPath = new PathString("/");
         }
 
         /// <summary>
@@ -45,6 +52,8 @@ namespace Auth0.Owin
         public string Connection { get; set; }
 
         public string Domain { get; set; }
+
+        public bool SaveAccessToken { get; set; }
 
         public bool SaveIdToken { get; set; }
 
@@ -91,6 +100,11 @@ namespace Auth0.Owin
         /// Default value is "/signin-auth0".
         /// </summary>
         public PathString CallbackPath { get; set; }
+
+        /// <summary>
+        /// The request path within the application's base path where the user-agent will be returned when an error occurred during authentication.
+        /// </summary>
+        public PathString ErrorRedirectPath { get; set; }
 
         /// <summary>
         /// The request path within the application's base path where the user-agent will be returned when the middleware is completed.

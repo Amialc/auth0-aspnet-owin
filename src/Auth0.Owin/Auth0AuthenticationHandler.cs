@@ -59,14 +59,6 @@ namespace Auth0.Owin
                     return new AuthenticationTicket(null, properties);
                 }
 
-                var tokenRequestParameters = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "client_id={0}&redirect_uri={1}&client_secret={2}&code={3}&grant_type=authorization_code",
-                    Uri.EscapeDataString(Options.ClientId),
-                    Uri.EscapeDataString(GenerateRedirectUri(properties)),
-                    Uri.EscapeDataString(Options.ClientSecret),
-                    code);
-
                 var body = new Dictionary<string, string> {
                     { "client_id", Options.ClientId },
                     { "redirect_uri", GenerateRedirectUri(properties) },
@@ -130,8 +122,8 @@ namespace Auth0.Owin
                     context.Identity.AddClaim(new Claim("id_token", context.IdToken, ClaimValueTypes.String, Constants.Auth0Issuer));
                 if (Options.SaveRefreshToken && !string.IsNullOrWhiteSpace(context.RefreshToken))
                     context.Identity.AddClaim(new Claim("refresh_token", context.RefreshToken, ClaimValueTypes.String, Constants.Auth0Issuer));
-
-                context.Identity.AddClaim(new Claim("access_token", context.AccessToken, ClaimValueTypes.String, Constants.Auth0Issuer));
+                if (Options.SaveAccessToken && !string.IsNullOrWhiteSpace(context.AccessToken))
+                    context.Identity.AddClaim(new Claim("access_token", context.AccessToken, ClaimValueTypes.String, Constants.Auth0Issuer));
 
                 context.Properties = properties ?? new AuthenticationProperties();
 
@@ -224,6 +216,39 @@ namespace Auth0.Owin
             return Task.FromResult<object>(null);
         }
 
+        protected override Task ApplyResponseGrantAsync()
+        {
+            AuthenticationResponseRevoke signout = Helper.LookupSignOut(Options.AuthenticationType, Options.AuthenticationMode);
+            if (signout != null)
+            {
+                // Base logout url
+                var logoutUri = $"https://{Options.Domain}/v2/logout?client_id={Options.ClientId}";
+
+                // Add redirect after logout
+                var postLogoutUri = signout.Properties.RedirectUri;
+                if (!string.IsNullOrEmpty(postLogoutUri))
+                {
+                    if (postLogoutUri.StartsWith("/"))
+                    {
+                        // transform to absolute
+                        postLogoutUri = Request.Scheme + "://" + Request.Host + postLogoutUri;
+                    }
+                    logoutUri += $"&returnTo={Uri.EscapeDataString(postLogoutUri)}";
+                }
+
+                // Handle federated logout
+                if (signout.Properties.Dictionary.ContainsKey(".federated") &&
+                    signout.Properties.Dictionary[".federated"] == "true")
+                    logoutUri += "&federated";
+
+                var logoutContext = new Auth0ApplyLogoutContext(
+                    Context, Options, signout.Properties, logoutUri);
+                Options.Provider.ApplyLogout(logoutContext);
+            }
+
+            return base.ApplyResponseGrantAsync();
+        }
+
         public override async Task<bool> InvokeAsync()
         {
             return await InvokeReplyPathAsync();
@@ -237,7 +262,7 @@ namespace Auth0.Owin
                 {
                     _logger.WriteVerbose("Remote server returned an error: " + Request.QueryString);
 
-                    var redirectUrl = Options.RedirectPath + Request.QueryString;
+                    var redirectUrl = RequestPathBase + Options.ErrorRedirectPath + Request.QueryString;
                     Response.Redirect(redirectUrl);
                     return true;
                 }
@@ -268,7 +293,7 @@ namespace Auth0.Owin
 
                 if (!context.IsRequestCompleted)
                 {
-                    string redirectUri = context.RedirectUri ?? Options.RedirectPath.ToString();
+                    string redirectUri = context.RedirectUri ?? RequestPathBase + Options.RedirectPath.ToString();
                     if (context.Identity == null)
                     {
                         // add a redirect hint that sign-in failed in some way
